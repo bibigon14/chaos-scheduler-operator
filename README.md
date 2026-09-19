@@ -1,135 +1,115 @@
 # chaos-scheduler-operator
-// TODO(user): Add simple overview of use/purpose
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A Kubernetes operator that runs scheduled fault injection experiments with a Prometheus-based SLO burn-rate guardrail. If your reliability signals are already burning, the operator refuses to make things worse.
 
-## Getting Started
+## Why this exists
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+I run a homelab k3s cluster whose observability stack I also use as a portfolio artifact. For about eight months a plain `CronJob` chaos-monkey killed one random pod every two hours across a couple of namespaces. Fine for demonstrating that pods survive restarts, useless as a real reliability tool.
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+In mid-September 2026 I spent three days investigating recurring one-hour gaps in the 7-day SLO series on my homelab Grafana dashboards. Every day, in a predictable window overlapping a systemd-timer-driven Prometheus restart, samples for the SLO recording rules would disappear retroactively. I churned through six wrong hypotheses (rolling-window off-by-one, `avg_over_time` semantics on incomplete ranges, WAL corruption at rest, cadvisor churn, kubelet GC, rule evaluation latency) before landing on the real cause: an unresolved upstream bug ([prometheus#16074](https://github.com/prometheus/prometheus/issues/16074)) corrupts WAL segments periodically, my nightly restart timer was working around it, and the restart's WAL replay was silently deleting every segment newer than the corruption. The workaround was destroying an hour of head-window data every night.
 
-```sh
-make docker-build docker-push IMG=<some-registry>/chaos-scheduler-operator:tag
+The whole time, the chaos-monkey `CronJob` was firing on schedule regardless of the fact that Prometheus was actively eating its own data. It had no way to know the SLO error budget was already smoking; it was just a `spec.schedule` and a shell script. That's the gap this operator closes.
+
+## What it does
+
+- **Declarative**: chaos experiments are Kubernetes CRs (`ChaosExperiment`), reconciled by a controller-runtime manager. `kubectl get chaos -A` shows schedule, last run, last result, run count, and next fire time as printer columns.
+- **Guardrailed**: an optional `spec.guardrail` runs an arbitrary PromQL query before the action. If the value exceeds the configured threshold, the reconciler aborts the run and records a reason in status. A burning SLO stops chaos automatically.
+- **Scoped**: the pod selector requires an explicit `namespace` and a non-empty `labelSelector`. There is no "match everything" mode. A validating webhook will reject reserved namespaces (`kube-system`, `kube-public`) in v1alpha2.
+- **Observable**: the operator exposes its own metrics on the controller-runtime metrics registry:
+  - `chaos_experiment_runs_total{namespace,name,result}` where result is `Completed`, `Aborted`, or `Failed`
+  - `chaos_experiment_guardrail_check_duration_seconds{namespace,name,outcome}` for guardrail latency
+  - `chaos_experiment_last_run_timestamp{namespace,name}` for staleness alerts
+
+## Example
+
+```yaml
+apiVersion: chaos.dstepanov.dev/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: kill-random-app-pod
+  namespace: apps
+spec:
+  schedule: "0 */2 * * *"
+  selector:
+    namespace: apps
+    labelSelector:
+      matchLabels:
+        chaos.dstepanov.dev/eligible: "true"
+  action:
+    type: PodKill
+    podKill:
+      count: 1
+  guardrail:
+    prometheusUrl: http://prometheus.monitoring.svc:9090
+    query: 'max(slo:service:burn_rate_1h)'
+    abortIfGreaterThan: "6"
+  ttl: 5m
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+Pods opt in with the `chaos.dstepanov.dev/eligible=true` label. Every two hours the reconciler queries the max 1-hour burn rate across services. If it's over 6x, the run is aborted with a status reason naming the exact value that tripped the guardrail. Otherwise one eligible Running pod is picked at random and deleted.
 
-**Install the CRDs into the cluster:**
+## Architecture
 
-```sh
+```mermaid
+flowchart LR
+    U[User] -->|kubectl apply| API[Kubernetes API]
+    API -->|watch| R[ChaosExperimentReconciler]
+    R -->|Query PromQL| P[Prometheus]
+    P -->|value| R
+    R -->|abort if over threshold| S1[Status: Aborted]
+    R -->|list + delete pods| POD[Target Pods]
+    R -->|update| S2[Status: Completed]
+    R -->|expose /metrics| MET[Prometheus scrape]
+```
+
+## Design notes
+
+- The reconciler is stateless. Scheduling state lives in `status.lastRun` and `status.nextRun` on the CR; requeueing is driven by `RequeueAfter: sched.Next(lastRun) - now`. No in-memory cron table.
+- Cron parsing is anchored to UTC so schedule semantics don't shift between developer machines (`time.Local`) and containers (UTC by default). CR authors can reason about `0 */2 * * *` as "every even hour UTC" regardless of where the operator runs.
+- `PodKill` filters to `Phase=Running` pods with no active `DeletionTimestamp` before shuffling, so the requested count reflects actual kills, not attempts against already-terminating pods.
+- The guardrail query has its own timeout independent of the reconciler context. A slow Prometheus becomes a `Failed` result with a clear reason, not a hung reconcile.
+- Prometheus client is injected via a factory (`promAPIFactory`) so the envtest suite drives the guardrail path with a `fakePromAPI` returning canned values.
+
+## Getting started
+
+Prerequisites: Go 1.22+, `kubectl`, a cluster (k3s, kind, or anything with cluster-admin).
+
+```bash
+# Run tests (envtest downloads its own apiserver + etcd)
+make test
+
+# Build the manager binary
+make build
+
+# Deploy CRDs and manager into the current-context cluster
 make install
+make deploy IMG=ghcr.io/bibigon14/chaos-scheduler-operator:latest
+
+# Apply the sample experiment
+kubectl apply -f config/samples/chaos_v1alpha1_chaosexperiment.yaml
+
+# Watch it
+kubectl get chaos -A -w
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+Uninstall:
 
-```sh
-make deploy IMG=<some-registry>/chaos-scheduler-operator:tag
-```
-
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
-
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
-
-```sh
-kubectl apply -k config/samples/
-```
-
->**NOTE**: Ensure that the samples has default values to test it out.
-
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
-
-```sh
-kubectl delete -k config/samples/
-```
-
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
+```bash
+make undeploy
 make uninstall
 ```
 
-**UnDeploy the controller from the cluster:**
+## Status
 
-```sh
-make undeploy
-```
+**v1alpha1**: `PodKill` action, `Prometheus` guardrail, cron scheduling, status subresource. Deployed to a single-node k3s homelab and running against real SLO burn-rate rules.
 
-## Project Distribution
+## Roadmap (v1alpha2)
 
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/chaos-scheduler-operator:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/chaos-scheduler-operator/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+- Additional actions: `NetworkChaos` (partition, latency injection via tc), `StressChaos` (cpu/memory pressure), `ContainerKill` (target one container in a multi-container pod).
+- Validating admission webhook: reject `kube-system` and other reserved namespaces, reject empty selectors defensively (already required by the CRD schema, but the webhook message is friendlier than a JSON schema error).
+- Multiple guardrails per experiment with `all-of` / `any-of` semantics.
+- Slack / Telegram notifier as an optional side output on `Aborted` results.
 
 ## License
 
-Copyright 2026 Dmitry Stepanov.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+Apache-2.0. See [LICENSE](LICENSE).
