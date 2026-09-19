@@ -1,0 +1,9 @@
+apiVersion: chaos.dstepanov.dev/v1alpha1
+kind: ChaosExperiment
+metadata:
+  labels:
+    app.kubernetes.io/name: chaos-scheduler-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: chaosexperiment-sample
+spec:
+  # TODO(user): Add fields here
