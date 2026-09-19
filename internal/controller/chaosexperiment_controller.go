@@ -96,7 +96,7 @@ func (r *ChaosExperimentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	nextFire := sched.Next(now)
 	lastRun := time.Time{}
 	if exp.Status.LastRun != nil {
-		lastRun = exp.Status.LastRun.Time.UTC()
+		lastRun = exp.Status.LastRun.UTC()
 	}
 	dueAt := sched.Next(lastRun)
 
@@ -282,7 +282,10 @@ func (r *ChaosExperimentReconciler) scheduleNext(
 
 	if err := r.Status().Update(ctx, exp); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			// Conflict on optimistic update: retry immediately with a small
+			// backoff via RequeueAfter (Requeue field was deprecated in
+			// controller-runtime v0.19).
+			return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 		}
 		return ctrl.Result{}, err
 	}
