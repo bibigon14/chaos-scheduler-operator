@@ -38,19 +38,13 @@ jobs:
         run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.22
       - name: Prepare envtest assets
         run: |
-          # Find the newest envtest bundle whose minor matches k8s.io/api in go.mod.
-          MINOR=$(grep 'k8s.io/api ' go.mod | awk '{print $2}' | sed 's/^v//' | cut -d. -f1-2)
-          # setup-envtest list prints available bundles; pick the latest patch for our minor.
-          VERSION=$(setup-envtest list --output json | \
-            jq -r --arg minor "$MINOR" '.[] | select(.version | startswith($minor)) | .version' | \
-            sort -V | tail -n1)
-          if [ -z "$VERSION" ]; then
-            echo "No envtest bundle available for k8s $MINOR" >&2
-            exit 1
-          fi
-            echo "Using envtest K8s version $VERSION"
-          setup-envtest use "$VERSION" --bin-dir "$GITHUB_WORKSPACE/bin"
-          echo "KUBEBUILDER_ASSETS=$(setup-envtest use "$VERSION" --bin-dir "$GITHUB_WORKSPACE/bin" -p path)" >> $GITHUB_ENV
+          # k8s.io/api in go.mod tracks Kubernetes minor: v0.34.x <=> k8s 1.34.x.
+          # setup-envtest accepts wildcards; `1.34.x!` fetches the latest patch
+          # available in the upstream index.
+          K8S_MINOR=1.$(grep 'k8s.io/api ' go.mod | awk '{print $2}' | sed 's/^v0\.//' | cut -d. -f1)
+          echo "Using envtest K8s minor $K8S_MINOR (from k8s.io/api in go.mod)"
+          setup-envtest use "${K8S_MINOR}.x!" --bin-dir "$GITHUB_WORKSPACE/bin"
+          echo "KUBEBUILDER_ASSETS=$(setup-envtest use "${K8S_MINOR}.x!" --bin-dir "$GITHUB_WORKSPACE/bin" -p path)" >> $GITHUB_ENV
       - name: Run tests
         run: go test ./... -race -coverprofile=cover.out -covermode=atomic
       - name: Upload coverage
