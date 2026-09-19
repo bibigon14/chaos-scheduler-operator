@@ -38,10 +38,19 @@ jobs:
         run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.22
       - name: Prepare envtest assets
         run: |
-          ENVTEST_K8S_VERSION=$(grep 'k8s.io/api ' go.mod | awk '{print $2}' | sed 's/^v//' | cut -d. -f1-2).0
-          echo "ENVTEST_K8S_VERSION=$ENVTEST_K8S_VERSION" >> $GITHUB_ENV
-          setup-envtest use "$ENVTEST_K8S_VERSION" --bin-dir "$GITHUB_WORKSPACE/bin"
-          echo "KUBEBUILDER_ASSETS=$(setup-envtest use "$ENVTEST_K8S_VERSION" --bin-dir "$GITHUB_WORKSPACE/bin" -p path)" >> $GITHUB_ENV
+          # Find the newest envtest bundle whose minor matches k8s.io/api in go.mod.
+          MINOR=$(grep 'k8s.io/api ' go.mod | awk '{print $2}' | sed 's/^v//' | cut -d. -f1-2)
+          # setup-envtest list prints available bundles; pick the latest patch for our minor.
+          VERSION=$(setup-envtest list --output json | \
+            jq -r --arg minor "$MINOR" '.[] | select(.version | startswith($minor)) | .version' | \
+            sort -V | tail -n1)
+          if [ -z "$VERSION" ]; then
+            echo "No envtest bundle available for k8s $MINOR" >&2
+            exit 1
+          fi
+            echo "Using envtest K8s version $VERSION"
+          setup-envtest use "$VERSION" --bin-dir "$GITHUB_WORKSPACE/bin"
+          echo "KUBEBUILDER_ASSETS=$(setup-envtest use "$VERSION" --bin-dir "$GITHUB_WORKSPACE/bin" -p path)" >> $GITHUB_ENV
       - name: Run tests
         run: go test ./... -race -coverprofile=cover.out -covermode=atomic
       - name: Upload coverage
