@@ -38,7 +38,11 @@ import (
 	"github.com/bibigon14/chaos-scheduler-operator/internal/metrics"
 )
 
-// cronParser accepts standard 5-field expressions in the controller's TZ.
+// cronParser accepts standard 5-field expressions. All Next() computations
+// are anchored to UTC below, so schedule semantics don't shift between the
+// operator's local TZ (Docker containers default to UTC, developer machines
+// don't) and the CR author's mental model. Document this in the CRD when
+// v1alpha2 lands.
 var cronParser = cron.NewParser(
 	cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow,
 )
@@ -88,11 +92,11 @@ func (r *ChaosExperimentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			fmt.Sprintf("invalid schedule %q: %v", exp.Spec.Schedule, err))
 	}
 
-	now := r.Now()
+	now := r.Now().UTC()
 	nextFire := sched.Next(now)
 	lastRun := time.Time{}
 	if exp.Status.LastRun != nil {
-		lastRun = exp.Status.LastRun.Time
+		lastRun = exp.Status.LastRun.Time.UTC()
 	}
 	dueAt := sched.Next(lastRun)
 
@@ -269,9 +273,9 @@ func (r *ChaosExperimentReconciler) scheduleNext(
 		return ctrl.Result{RequeueAfter: time.Minute}, r.Status().Update(ctx, exp)
 	}
 
-	base := r.Now()
+	base := r.Now().UTC()
 	if from != nil {
-		base = *from
+		base = from.UTC()
 	}
 	next := sched.Next(base)
 	exp.Status.NextRun = &metav1.Time{Time: next}
