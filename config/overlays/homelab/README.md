@@ -10,7 +10,21 @@ Differences from `config/default`:
 | Metrics service  | ClusterIP                      | NodePort `30190`               |
 | Image            | `controller:latest`            | `ghcr.io/bibigon14/...:latest` |
 
-## Apply
+## Deploy
+
+### GitOps (preferred)
+
+The overlay is wired to ArgoCD. Apply the Application manifest once and
+ArgoCD will keep the cluster in sync with `main`:
+
+    kubectl apply -f ../../../argocd/application.yaml
+
+See [`argocd/application.yaml`](../../../argocd/application.yaml) for the
+sync policy (automated prune + self-heal + ServerSideApply).
+
+### Manual (fallback)
+
+For clusters without ArgoCD, or for quick smoke tests:
 
     kustomize build config/overlays/homelab | kubectl apply -f -
 

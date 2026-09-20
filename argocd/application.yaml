@@ -1,0 +1,38 @@
+# ArgoCD Application for chaos-scheduler-operator.
+#
+# Apply once with:
+#   kubectl apply -f argocd/application.yaml
+#
+# ArgoCD will then watch config/overlays/homelab on the main branch and
+# reconcile the cluster to match it, auto-pruning removed resources and
+# self-healing manual drift.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: chaos-scheduler-operator
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/bibigon14/chaos-scheduler-operator.git
+    targetRevision: HEAD
+    path: config/overlays/homelab
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: chaos-scheduler-operator-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        maxDuration: 3m
+        factor: 2
+  revisionHistoryLimit: 10
