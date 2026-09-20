@@ -142,7 +142,7 @@ func (r *ChaosExperimentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			fmt.Sprintf("killed %d pod(s)", killed))
 	default:
 		return r.finish(ctx, &exp, chaosv1alpha1.ResultFailed,
-			fmt.Sprintf("unsupported action %q", exp.Spec.Action.Type))		
+			fmt.Sprintf("unsupported action %q", exp.Spec.Action.Type))
 	}
 }
 
