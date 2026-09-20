@@ -1,9 +1,35 @@
+# Sample ChaosExperiment: kill one random pod in the `apps` namespace every
+# two hours, but only while the 7-day error budget has more than 50%
+# remaining. The guardrail query returns "budget consumed" (1 - remaining);
+# aborting when that exceeds 0.5 means we stop injecting chaos once the
+# service has already burned half its weekly budget.
+#
+# Prometheus is reachable at http://192.168.50.212:9090 from inside the k3s
+# cluster (bare-metal Prometheus on the Pi host). Adjust for your setup.
+#
+# Target selection: pods in `apps` labeled `chaos.dstepanov.dev/eligible=true`.
+# Only Running pods without a DeletionTimestamp are eligible for kill.
 apiVersion: chaos.dstepanov.dev/v1alpha1
 kind: ChaosExperiment
 metadata:
   labels:
     app.kubernetes.io/name: chaos-scheduler-operator
     app.kubernetes.io/managed-by: kustomize
-  name: chaosexperiment-sample
+  name: kill-random-app-pod
+  namespace: apps
 spec:
-  # TODO(user): Add fields here
+  schedule: "0 */2 * * *"
+  selector:
+    namespace: apps
+    labelSelector:
+      matchLabels:
+        chaos.dstepanov.dev/eligible: "true"
+  action:
+    type: PodKill
+    podKill:
+      count: 1
+  guardrail:
+    prometheusUrl: http://192.168.50.212:9090
+    query: "1 - min(slo:probe:overall_error_budget_remaining_7d)"
+    abortIfGreaterThan: "0.5"
+  ttl: 5m

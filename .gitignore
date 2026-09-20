@@ -3,3 +3,7 @@ cover.out
 *.test
 .DS_Store
 .envrc
+
+# kustomize build outputs
+deploy.yaml
+/tmp-deploy*.yaml

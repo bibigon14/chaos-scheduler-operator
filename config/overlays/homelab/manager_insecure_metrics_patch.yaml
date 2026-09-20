@@ -1,0 +1,10 @@
+# Replace the entire args list. The base config/default uses a JSON
+# patch to prepend --metrics-bind-address=:8443; we override wholesale
+# so the final ordering is deterministic regardless of patch order.
+- op: replace
+  path: /spec/template/spec/containers/0/args
+  value:
+    - --metrics-bind-address=:8080
+    - --metrics-secure=false
+    - --health-probe-bind-address=:8081
+    - --leader-elect

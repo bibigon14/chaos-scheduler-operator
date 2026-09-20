@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Homelab-flavored overlay of config/default.
+# Deviates from production baseline in two ways:
+#   1. Metrics served over plain HTTP on :8080 (default is HTTPS on :8443
+#      with kube-rbac-proxy). Skipped here because the homelab Prometheus
+#      does not have a bearer token or TLS trust to the operator's SA.
+#   2. Metrics Service exposed as NodePort 30190 for scraping from
+#      Prometheus running on a different node. Default is ClusterIP.
+# For a production cluster, apply config/default directly.
+
+resources:
+  - ../../default
+
+images:
+  - name: controller
+    newName: ghcr.io/bibigon14/chaos-scheduler-operator
+    newTag: latest
+
+patches:
+  - path: manager_insecure_metrics_patch.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: controller-manager
+  - path: metrics_service_nodeport_patch.yaml
+    target:
+      version: v1
+      kind: Service
+      name: controller-manager-metrics-service
