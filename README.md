@@ -43,14 +43,45 @@ spec:
       count: 1
   guardrail:
     prometheusUrl: http://prometheus.monitoring.svc:9090
-    query: "1 - min(slo:probe:overall_error_budget_remaining_7d)"
-    abortIfGreaterThan: "0.5"
+    query: '1 - avg(avg_over_time(up{job=~"wc2026bot|bridge|riverbot|redis"}[5m]))'
+    abortIfGreaterThan: "0.05"
   ttl: 5m
 ```
 
-Pods opt in with the `chaos.dstepanov.dev/eligible=true` label. Every two hours the reconciler evaluates the guardrail query - here, the fraction of the weekly error budget already consumed. If more than half the budget is gone, the run is aborted with a status reason naming the exact value that tripped the guardrail. Otherwise one eligible Running pod is picked at random and deleted.
+Pods opt in with the `chaos.dstepanov.dev/eligible=true` label. Every two hours the reconciler evaluates the guardrail query - here, the fraction of scrapes where any victim service was down over the last 5 minutes. If more than 5% of scrapes missed, the run is aborted with a status reason naming the exact value that tripped the guardrail. Otherwise one eligible Running pod is picked at random and deleted.
 
 ![Opt-in labeling: only pods marked eligible are candidates for kill](docs/screenshots/deployment-eligible-label.png)
+
+### Multiple experiments across namespaces
+
+An operator that runs only one experiment isn't much of a platform. A second sample at [`config/samples/chaos_v1alpha1_chaosexperiment_demo.yaml`](config/samples/chaos_v1alpha1_chaosexperiment_demo.yaml) targets an Argo Rollout in a different namespace on a schedule offset from the primary experiment, so the two never fire in the same minute and their effects are always attributable to the CR that fired:
+
+```yaml
+apiVersion: chaos.dstepanov.dev/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: kill-random-demo-pod
+  namespace: blue-green-demo
+spec:
+  schedule: "30 */2 * * *"   # 30-minute offset from the primary experiment
+  selector:
+    namespace: blue-green-demo
+    labelSelector:
+      matchLabels:
+        chaos.dstepanov.dev/eligible: "true"
+  action:
+    type: PodKill
+    podKill:
+      count: 1
+  guardrail:
+    prometheusUrl: http://192.168.50.212:9090
+    query: '1 - avg(avg_over_time(up{job="demo-app"}[5m]))'
+    abortIfGreaterThan: "0.05"
+  ttl: 5m
+```
+
+Each CR is scoped to its own namespace via `spec.selector.namespace` - the reconciler never crosses that boundary, so RBAC stays namespace-local and blast radius is bounded to what the CR names. Pod selection uses the standard [`labels.Selector`](https://pkg.go.dev/k8s.io/apimachinery/pkg/labels#Selector), so the same operator handles anything with a pod template: Deployments, StatefulSets, and Argo Rollouts (as here) work without any special handling because the target abstraction is the pod, not its owner.
+
 
 ## Architecture
 
