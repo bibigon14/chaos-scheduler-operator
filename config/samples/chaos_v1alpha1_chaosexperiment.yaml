@@ -1,14 +1,19 @@
 # Sample ChaosExperiment: kill one random pod in the `apps` namespace every
-# two hours, but only while the 7-day error budget has more than 50%
-# remaining. The guardrail query returns "budget consumed" (1 - remaining);
-# aborting when that exceeds 0.5 means we stop injecting chaos once the
-# service has already burned half its weekly budget.
+# two hours, protected by an availability SLO.
+#
+# The guardrail query returns 1 - avg availability across the victim pool
+# over the last 5 minutes. `avg_over_time(up[5m])` per victim service falls
+# below 1.0 when its scrape target is down, so `1 - avg` is the fraction of
+# scrapes that missed. Aborting when that fraction exceeds 5% means we stop
+# injecting chaos while any downstream service is already unhealthy - the
+# canonical "don't kill more when things are already burning" pattern.
+#
+# The `job=~` regex targets exactly the scrape jobs backing our eligible
+# workloads (bots + cache). demo-app lives in a separate namespace and has
+# its own ChaosExperiment (see -demo sample).
 #
 # Prometheus is reachable at http://192.168.50.212:9090 from inside the k3s
 # cluster (bare-metal Prometheus on the Pi host). Adjust for your setup.
-#
-# Target selection: pods in `apps` labeled `chaos.dstepanov.dev/eligible=true`.
-# Only Running pods without a DeletionTimestamp are eligible for kill.
 apiVersion: chaos.dstepanov.dev/v1alpha1
 kind: ChaosExperiment
 metadata:
@@ -30,6 +35,6 @@ spec:
       count: 1
   guardrail:
     prometheusUrl: http://192.168.50.212:9090
-    query: "1 - min(slo:probe:overall_error_budget_remaining_7d)"
-    abortIfGreaterThan: "0.5"
+    query: '1 - avg(avg_over_time(up{job=~"wc2026bot|bridge|riverbot|redis"}[5m]))'
+    abortIfGreaterThan: "0.05"
   ttl: 5m

@@ -1,0 +1,33 @@
+# Sample ChaosExperiment #2: cross-namespace demo.
+#
+# Runs against demo-app in the `blue-green-demo` namespace on a 2-hour
+# schedule offset 30 minutes from the primary experiment, so the two
+# experiments never fire simultaneously and their effects are attributable.
+#
+# Uses the same availability-based guardrail scoped to just demo-app.
+# `count: 1` out of 2 replicas exercises the "kill half the pool" case
+# without taking the service fully down.
+apiVersion: chaos.dstepanov.dev/v1alpha1
+kind: ChaosExperiment
+metadata:
+  labels:
+    app.kubernetes.io/name: chaos-scheduler-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: kill-random-demo-pod
+  namespace: blue-green-demo
+spec:
+  schedule: "30 */2 * * *"
+  selector:
+    namespace: blue-green-demo
+    labelSelector:
+      matchLabels:
+        chaos.dstepanov.dev/eligible: "true"
+  action:
+    type: PodKill
+    podKill:
+      count: 1
+  guardrail:
+    prometheusUrl: http://192.168.50.212:9090
+    query: '1 - avg(avg_over_time(up{job="demo-app"}[5m]))'
+    abortIfGreaterThan: "0.05"
+  ttl: 5m
