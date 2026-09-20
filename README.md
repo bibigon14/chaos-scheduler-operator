@@ -132,7 +132,7 @@ The reconciler also logs a structured line at every decision branch (experiment 
 
 And here is a real run in the homelab, captured live at 06:00 PDT - old pod terminating on the left, replacement rolling up on the right, all in about two seconds:
 
-![Pod lifecycle during a chaos run](docs/screenshots/chaos-kill-in-action.png)
+![Pod lifecycle and structured logs during a chaos run](docs/screenshots/chaos-kill-with-logs.png)
 
 ## Status
 
