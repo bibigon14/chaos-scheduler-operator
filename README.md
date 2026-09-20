@@ -145,6 +145,10 @@ And here is a real run in the homelab, captured live at 06:00 PDT - old pod term
 - Multiple guardrails per experiment with `all-of` / `any-of` semantics.
 - Slack / Telegram notifier as an optional side output on `Aborted` results.
 
+## Design decisions
+
+Non-obvious choices - deployment layout, ArgoCD placement, CI matrix - are documented as decision records in [`docs/decisions/`](docs/decisions/).
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
