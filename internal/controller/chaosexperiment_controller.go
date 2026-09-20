@@ -102,6 +102,7 @@ func (r *ChaosExperimentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Not yet due: requeue at the exact fire time.
 	if now.Before(dueAt) {
+		logger.V(1).Info("not yet due, requeueing", "now", now, "dueAt", dueAt, "in", dueAt.Sub(now).String())
 		exp.Status.NextRun = &metav1.Time{Time: nextFire}
 		if err := r.Status().Update(ctx, &exp); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(err)
