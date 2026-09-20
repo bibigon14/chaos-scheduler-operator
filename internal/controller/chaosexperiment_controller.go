@@ -108,31 +108,41 @@ func (r *ChaosExperimentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		return ctrl.Result{RequeueAfter: dueAt.Sub(now)}, nil
 	}
+	logger.Info("experiment due, executing run",
+		"schedule", exp.Spec.Schedule,
+		"lastRun", lastRun,
+		"dueAt", dueAt)
 
 	// Guardrail check: any error or over-threshold aborts before touching pods.
 	if exp.Spec.Guardrail != nil {
 		aborted, reason, err := r.checkGuardrail(ctx, &exp)
 		if err != nil {
+			logger.Error(err, "guardrail check errored, aborting run")
 			return r.finish(ctx, &exp, chaosv1alpha1.ResultFailed,
 				fmt.Sprintf("guardrail error: %v", err))
 		}
 		if aborted {
+			logger.Info("guardrail aborted run", "reason", reason)
 			return r.finish(ctx, &exp, chaosv1alpha1.ResultAborted, reason)
 		}
+		logger.Info("guardrail check passed")
 	}
 
 	switch exp.Spec.Action.Type {
 	case chaosv1alpha1.ActionTypePodKill:
+		logger.Info("executing PodKill action", "requestedCount", exp.Spec.Action.PodKill.Count)
 		killed, err := r.podKill(ctx, &exp)
 		if err != nil {
+			logger.Error(err, "PodKill failed")
 			return r.finish(ctx, &exp, chaosv1alpha1.ResultFailed,
 				fmt.Sprintf("PodKill failed: %v", err))
 		}
+		logger.Info("PodKill completed", "killed", killed)
 		return r.finish(ctx, &exp, chaosv1alpha1.ResultCompleted,
 			fmt.Sprintf("killed %d pod(s)", killed))
 	default:
 		return r.finish(ctx, &exp, chaosv1alpha1.ResultFailed,
-			fmt.Sprintf("unsupported action %q", exp.Spec.Action.Type))
+			fmt.Sprintf("unsupported action %q", exp.Spec.Action.Type))		
 	}
 }
 
