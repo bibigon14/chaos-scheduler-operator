@@ -2,6 +2,8 @@
 
 A Kubernetes operator that runs scheduled fault injection experiments with a Prometheus-based SLO burn-rate guardrail. If your reliability signals are already burning, the operator refuses to make things worse.
 
+![Grafana dashboard for the operator running in the author's homelab](docs/screenshots/grafana-dashboard.png)
+
 ## Why this exists
 
 I run a homelab k3s cluster whose observability stack I also use as a portfolio artifact. For about eight months a plain `CronJob` chaos-monkey killed one random pod every two hours across a couple of namespaces. Fine for demonstrating that pods survive restarts, useless as a real reliability tool.
@@ -41,12 +43,14 @@ spec:
       count: 1
   guardrail:
     prometheusUrl: http://prometheus.monitoring.svc:9090
-    query: 'max(slo:service:burn_rate_1h)'
-    abortIfGreaterThan: "6"
+    query: "1 - min(slo:probe:overall_error_budget_remaining_7d)"
+    abortIfGreaterThan: "0.5"
   ttl: 5m
 ```
 
-Pods opt in with the `chaos.dstepanov.dev/eligible=true` label. Every two hours the reconciler queries the max 1-hour burn rate across services. If it's over 6x, the run is aborted with a status reason naming the exact value that tripped the guardrail. Otherwise one eligible Running pod is picked at random and deleted.
+Pods opt in with the `chaos.dstepanov.dev/eligible=true` label. Every two hours the reconciler evaluates the guardrail query - here, the fraction of the weekly error budget already consumed. If more than half the budget is gone, the run is aborted with a status reason naming the exact value that tripped the guardrail. Otherwise one eligible Running pod is picked at random and deleted.
+
+![Opt-in labeling: only pods marked eligible are candidates for kill](docs/screenshots/deployment-eligible-label.png)
 
 ## Architecture
 
@@ -80,24 +84,55 @@ make test
 
 # Build the manager binary
 make build
-
-# Deploy CRDs and manager into the current-context cluster
-make install
-make deploy IMG=ghcr.io/bibigon14/chaos-scheduler-operator:latest
-
-# Apply the sample experiment
-kubectl apply -f config/samples/chaos_v1alpha1_chaosexperiment.yaml
-
-# Watch it
-kubectl get chaos -A -w
 ```
 
-Uninstall:
+## Deploy
+
+Two kustomize overlays ship with the repo:
+
+- [`config/default`](config/default) is the kubebuilder baseline for a production cluster: metrics on HTTPS `:8443` behind kube-rbac-proxy, ClusterIP service.
+- [`config/overlays/homelab`](config/overlays/homelab) is the author's Raspberry Pi k3s deployment: metrics on plain HTTP `:8080`, NodePort `30190` for scraping from bare-metal Prometheus. See [the overlay README](config/overlays/homelab/README.md) for why.
+
+### GitOps (preferred)
+
+An ArgoCD Application manifest lives at [`argocd/application.yaml`](argocd/application.yaml). Apply it once and ArgoCD watches the overlay on `main`, syncing changes automatically:
 
 ```bash
-make undeploy
-make uninstall
+kubectl apply -f argocd/application.yaml
 ```
+
+Sync policy is `automated` with `prune`, `selfHeal`, and `ServerSideApply`. Manual drift on the cluster reverts on the next reconcile.
+
+### Manual
+
+For a cluster without ArgoCD:
+
+```bash
+kubectl apply -k config/overlays/homelab
+kubectl apply -f config/samples/chaos_v1alpha1_chaosexperiment.yaml
+```
+
+Uninstall: `kubectl delete -k config/overlays/homelab`.
+
+## Observability
+
+Every reconcile emits three metrics: `chaos_experiment_runs_total` (counter by result), `chaos_experiment_guardrail_check_duration_seconds` (histogram), and `chaos_experiment_last_run_timestamp` (gauge). An import-ready Grafana dashboard is at [`docs/grafana/chaos-scheduler-operator.json`](docs/grafana/chaos-scheduler-operator.json).
+
+The reconciler also logs a structured line at every decision branch (experiment due, guardrail passed / aborted / errored, PodKill executing / completed / failed). Metrics tell you what happened; logs explain why.
+
+## Operator in action
+
+`kubectl get chaos -A -o wide` shows the CRD's printer columns populated from the status subresource:
+
+![kubectl get chaos output](docs/screenshots/kubectl-get-chaos.png)
+
+`kubectl describe` on a single experiment shows the full spec and the live status:
+
+![kubectl describe chaos output](docs/screenshots/kubectl-describe-chaos.png)
+
+And here is a real run in the homelab, captured live at 06:00 PDT - old pod terminating on the left, replacement rolling up on the right, all in about two seconds:
+
+![Pod lifecycle during a chaos run](docs/screenshots/chaos-kill-in-action.png)
 
 ## Status
 
