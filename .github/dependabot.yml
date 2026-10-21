@@ -1,0 +1,49 @@
+version: 2
+updates:
+  # Go modules - keep controller-runtime, kubebuilder, prometheus client bumps current.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+      - "go"
+    groups:
+      k8s-ecosystem:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+  # GitHub Actions workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "github-actions"
+  # Docker base image (Dockerfile distroless/golang bumps).
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+      - "docker"
