@@ -37,6 +37,7 @@ import (
 
 	chaosv1alpha1 "github.com/bibigon14/chaos-scheduler-operator/api/v1alpha1"
 	"github.com/bibigon14/chaos-scheduler-operator/internal/controller"
+	webhookv1alpha1 "github.com/bibigon14/chaos-scheduler-operator/internal/webhook/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -188,6 +189,17 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "chaosexperiment")
 		os.Exit(1)
+	}
+
+	// Validating admission webhook. Registered only when the webhook server
+	// is enabled (--webhook-port != -1). cert-manager provides the serving
+	// cert in production; envtest injects a self-signed one for integration
+	// tests. See config/webhook/ and config/certmanager/ for deploy wiring.
+	if webhookPort > 0 {
+		if err := webhookv1alpha1.SetupChaosExperimentWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up webhook", "webhook", "chaosexperiment")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 

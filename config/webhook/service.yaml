@@ -1,0 +1,16 @@
+# webhook-service fronts the admission webhook server inside the operator
+# pod. The port is fixed by controller-runtime's default (9443) and is
+# where the TLS cert in the cert-manager-issued secret is terminated.
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-service
+  namespace: system
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+    name: https
+  selector:
+    control-plane: controller-manager

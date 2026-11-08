@@ -1,0 +1,28 @@
+# Self-signed issuer and a cert for the webhook server. cert-manager must
+# be installed in the cluster for these to resolve; the installation
+# instructions are in the deploy section of README.md.
+#
+# The dnsNames resolve to the name-prefixed webhook Service; the kustomize
+# replacements block in ../default/kustomization.yaml rewrites index 0 and
+# 1 of dnsNames so they match the deployed namespace and prefix.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-issuer
+  namespace: system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: serving-cert
+  namespace: system
+spec:
+  dnsNames:
+  - SERVICE_NAME.SERVICE_NAMESPACE.svc
+  - SERVICE_NAME.SERVICE_NAMESPACE.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
+  secretName: webhook-server-cert

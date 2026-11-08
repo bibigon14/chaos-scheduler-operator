@@ -1,0 +1,23 @@
+# Mount the cert-manager-issued secret into the controller-manager pod
+# at the path controller-runtime's webhook server reads by default. The
+# cert-manager Certificate (../certmanager/certificate.yaml) writes to
+# the same secret name, closing the loop.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: system
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: cert
+          readOnly: true
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: webhook-server-cert

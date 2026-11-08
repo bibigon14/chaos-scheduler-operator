@@ -1,0 +1,12 @@
+# kustomizeconfig.yaml keeps the Certificate's dnsNames in sync with the
+# rendered Service name and namespace after kustomize applies its
+# transforms. The default/kustomization.yaml replacements block is what
+# actually performs the rewrite; this file tells kustomize that the field
+# exists and is a nameReference target.
+nameReference:
+- kind: Issuer
+  group: cert-manager.io
+  fieldSpecs:
+  - kind: Certificate
+    group: cert-manager.io
+    path: spec/issuerRef/name

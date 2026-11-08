@@ -151,6 +151,41 @@ Every reconcile emits three metrics: `chaos_experiment_runs_total` (counter by r
 
 The reconciler also logs a structured line at every decision branch (experiment due, guardrail passed / aborted / errored, PodKill executing / completed / failed). Metrics tell you what happened; logs explain why.
 
+## Validation
+
+A validating admission webhook rejects a `ChaosExperiment` at create or
+update time if any of the following holds; the response aggregates every
+violation so a single edit fixes them all:
+
+- `spec.schedule` does not parse as a 5-field cron expression. The CRD
+  schema already enforces `MinLength=9`; the webhook catches
+  syntactically-shaped but invalid values such as `0 24 * * *` (hour out
+  of range).
+- `spec.selector.namespace` is one of the Kubernetes-reserved
+  control-plane namespaces: `kube-system`, `kube-public`,
+  `kube-node-lease`. Chaos against the control plane is not a useful SLO
+  signal, so the webhook makes it impossible by construction.
+- `spec.selector.labelSelector` is empty (no `matchLabels` and no
+  `matchExpressions`). An empty selector would match every pod in the
+  namespace, turning a scheduled experiment into a namespace-wipe.
+- `spec.action.podKill.count < 1` when `action.type=PodKill`. The CRD
+  schema sets `Minimum=1` with a default of `1`, but a client that sends
+  `count: 0` explicitly passes CRD validation because zero is the Go
+  zero-value; the webhook closes that gap.
+
+Delete is always permitted - an operator must be able to remove a CR even
+if the admission rules have tightened since it was created, otherwise
+cleanup is impossible.
+
+The webhook server is only registered when `--webhook-port` is a positive
+value (default `9443`); setting `--webhook-port=-1` runs the controller
+without admission validation for local development. The config lives in
+[`config/webhook/`](config/webhook/) and
+[`config/certmanager/`](config/certmanager/); both are off by default in
+`config/default/kustomization.yaml` and require `cert-manager` in the
+cluster to issue the serving cert. See the Deploy section for how to
+enable them.
+
 ## Operator in action
 
 `kubectl get chaos -A -o wide` shows the CRD's printer columns populated from the status subresource:
@@ -167,12 +202,11 @@ And here is a real run in the homelab, captured live at 06:00 PDT - old pod term
 
 ## Status
 
-**v1alpha1**: `PodKill` action, `Prometheus` guardrail, cron scheduling, status subresource. Deployed to a single-node k3s homelab and running against real SLO burn-rate rules.
+**v1alpha1**: `PodKill` action, `Prometheus` guardrail, cron scheduling, status subresource, validating admission webhook. Deployed to a single-node k3s homelab and running against real SLO burn-rate rules.
 
 ## Roadmap (v1alpha2)
 
 - Additional actions: `NetworkChaos` (partition, latency injection via tc), `StressChaos` (cpu/memory pressure), `ContainerKill` (target one container in a multi-container pod).
-- Validating admission webhook: reject `kube-system` and other reserved namespaces, reject empty selectors defensively (already required by the CRD schema, but the webhook message is friendlier than a JSON schema error).
 - Multiple guardrails per experiment with `all-of` / `any-of` semantics.
 - Slack / Telegram notifier as an optional side output on `Aborted` results.
 
